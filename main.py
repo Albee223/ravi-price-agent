@@ -6,35 +6,51 @@ import re
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
 
+async def fetch_price_etmall(page):
+    price_el = await page.query_selector('.item-sale-price span')
+    if price_el:
+        price_text = await price_el.inner_text()
+        return price_text.strip()
+    return None
+
+async def fetch_price_shopee(page):
+    price_el = await page.query_selector('._3e_UQT')
+    if not price_el:
+        price_el = await page.query_selector('._3n5NQx')  # 嘗試另一種樣式
+    if price_el:
+        price_text = await price_el.inner_text()
+        return price_text.strip()
+    return None
+
+async def fetch_price_yahoo(page):
+    price_el = await page.query_selector('.HeroPrimaryInfo__price_HeroPrimaryInfo__price_3l0mj')
+    if price_el:
+        price_text = await price_el.inner_text()
+        return price_text.strip()
+    return None
+
 async def fetch_price(url):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         if not url:
             return None
-        await page.goto(url)
+        await page.goto(url, timeout=15000)
         await page.wait_for_timeout(3000)
 
         if "etmall.com.tw" in url:
-            element = await page.query_selector(".area_price .txt_red")
-        elif "pchome.com.tw" in url:
-            element = await page.query_selector("span.Price")
+            price = await fetch_price_etmall(page)
         elif "shopee.tw" in url:
-            element = await page.query_selector("._3e_UQT") or await page.query_selector("._2Shl1j")  # 不同樣式備援
-        elif "buy.yahoo.com" in url:
-            element = await page.query_selector("span[class*='Price']")  # 類似 .Price或價格樣式
+            price = await fetch_price_shopee(page)
+        elif "tw.buy.yahoo.com" in url:
+            price = await fetch_price_yahoo(page)
         else:
-            element = None
+            content = await page.content()
+            prices = re.findall(r"\$?\d{1,3}(,\d{3})*(\.\d+)?", content)
+            price = prices[0] if prices else None
 
-        if element:
-            text = await element.inner_text()
-            return re.sub(r"[^\d]", "", text)  # 保留純數字
-        else:
-            html = await page.content()
-            prices = re.findall(r"\$[\d,]+", html)
-            if prices:
-                return prices[0].replace(",", "").replace("$", "")
-        return None
+        await browser.close()
+        return price
 
 def query_notion_database():
     url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
@@ -47,10 +63,7 @@ def query_notion_database():
     return response.json()
 
 def update_page_price(page_id, price):
-    try:
-        price_number = int(float(price))
-    except:
-        return
+    parsed_price = float(price.replace(",", "").replace("$", "").replace("NT$", "").replace("元", "").strip())
     url = f"https://api.notion.com/v1/pages/{page_id}"
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
@@ -60,7 +73,7 @@ def update_page_price(page_id, price):
     data = {
         "properties": {
             "價格（TWD）": {
-                "number": price_number
+                "number": parsed_price
             },
             "查詢時間": {
                 "date": {
@@ -76,10 +89,10 @@ async def main():
     for row in data.get("results", []):
         props = row["properties"]
         product_name = props["商品名稱"]["title"][0]["text"]["content"]
-        product_url = props["商品連結"].get("url", "")
+        product_url = props["商品連結"]["url"]
         print(f"🔍 查詢商品：{product_name}")
         price = await fetch_price(product_url)
-        print(f"➡️ 擷取價格：{price}")
+        print(f"➡️ 取得價格：{price}")
         if price:
             update_page_price(row["id"], price)
 
