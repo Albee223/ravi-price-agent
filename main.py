@@ -1,17 +1,10 @@
-
 import os, datetime, asyncio
 from playwright.async_api import async_playwright
 import requests
+import re
 
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
-
-def parse_price(price_str):
-    import re
-    if not price_str:
-        return None
-    cleaned = re.sub(r"[^\d]", "", price_str)
-    return int(cleaned) if cleaned else None
 
 async def fetch_price(url):
     async with async_playwright() as p:
@@ -20,14 +13,27 @@ async def fetch_price(url):
         if not url:
             return None
         await page.goto(url)
-        await page.wait_for_timeout(4000)
-        content = await page.content()
-        await browser.close()
+        await page.wait_for_timeout(3000)
 
-        import re
-        prices = re.findall(r"\$?\d+[,.]?\d*", content)
-        if prices:
-            return parse_price(prices[0])
+        if "etmall.com.tw" in url:
+            element = await page.query_selector(".area_price .txt_red")
+        elif "pchome.com.tw" in url:
+            element = await page.query_selector("span.Price")
+        elif "shopee.tw" in url:
+            element = await page.query_selector("._3e_UQT") or await page.query_selector("._2Shl1j")  # 不同樣式備援
+        elif "buy.yahoo.com" in url:
+            element = await page.query_selector("span[class*='Price']")  # 類似 .Price或價格樣式
+        else:
+            element = None
+
+        if element:
+            text = await element.inner_text()
+            return re.sub(r"[^\d]", "", text)  # 保留純數字
+        else:
+            html = await page.content()
+            prices = re.findall(r"\$[\d,]+", html)
+            if prices:
+                return prices[0].replace(",", "").replace("$", "")
         return None
 
 def query_notion_database():
@@ -41,6 +47,10 @@ def query_notion_database():
     return response.json()
 
 def update_page_price(page_id, price):
+    try:
+        price_number = int(float(price))
+    except:
+        return
     url = f"https://api.notion.com/v1/pages/{page_id}"
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
@@ -50,7 +60,7 @@ def update_page_price(page_id, price):
     data = {
         "properties": {
             "價格（TWD）": {
-                "number": price
+                "number": price_number
             },
             "查詢時間": {
                 "date": {
@@ -66,10 +76,10 @@ async def main():
     for row in data.get("results", []):
         props = row["properties"]
         product_name = props["商品名稱"]["title"][0]["text"]["content"]
-        product_url = props["商品連結"]["url"]
+        product_url = props["商品連結"].get("url", "")
         print(f"🔍 查詢商品：{product_name}")
         price = await fetch_price(product_url)
-        print(f"➡️ 取得價格：{price}")
+        print(f"➡️ 擷取價格：{price}")
         if price:
             update_page_price(row["id"], price)
 
