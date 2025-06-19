@@ -7,7 +7,7 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
 
@@ -19,27 +19,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libasound2 \
-            libxss1 \
-            libxshmfence1 \
-            libatk-bridge2.0-0 \
-            libgtk-3-0 \
-            libx11-xcb1 \
-            libnss3 \
-            libxcomposite1 \
-            libxrandr2 \
-            libgbm1 \
-            libpango-1.0-0 \
-            libpangocairo-1.0-0 \
-            libxdamage1 \
-            libxext6 \
-            libxfixes3 \
-            libatspi2.0-0 \
-            libxkbcommon0 \
-            libdrm2 \
-            libx264-163 \
-            libasound2
+          sudo apt-get install -y libasound2 libx264-dev
 
       - name: Install Python dependencies
         run: |
